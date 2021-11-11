@@ -1,0 +1,109 @@
+---
+- name: Multiple NSG own multiple rules
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  vars:
+    resource_group:
+      name: rg-multi-nsg-rules
+      location: eastus
+      
+    network_security_group:
+      - name: NSG-A
+        rules:
+          - name: Allow_SSH
+            protocol: Tcp
+            destination_address_prefix: "*"
+            destination_port_range: 22
+            access: Allow
+            priority: 1000
+            direction: Inbound
+            source_address_prefix: "*"
+            source_port_range: "*"
+
+          - name: Allow_RDP
+            protocol: Tcp
+            destination_address_prefix: "*"
+            destination_port_range: 3389
+            access: Allow
+            priority: 1001
+            direction: Inbound
+            source_address_prefix: "*"
+            source_port_range: "*"
+                  
+      - name: NSG-B
+        rules:
+          - name: Allow_SSH
+            protocol: Tcp
+            destination_address_prefix: "*"
+            destination_port_range: 22
+            access: Allow
+            priority: 1000
+            direction: Inbound
+            source_address_prefix: "*"
+            source_port_range: "*"
+
+          - name: Allow_RDP
+            protocol: Tcp
+            destination_address_prefix: "*"
+            destination_port_range: 3389
+            access: Allow
+            priority: 1001
+            direction: Inbound
+            source_address_prefix: "*"
+            source_port_range: "*"
+
+          - name: Allow_HTTP
+            protocol: Tcp
+            destination_address_prefix: "*"
+            destination_port_range: 80
+            access: Allow
+            priority: 1002
+            direction: Inbound
+            source_address_prefix: "*"
+            source_port_range: "*"
+
+          - name: Allow_SQL
+            protocol: Tcp
+            destination_address_prefix: "*"
+            destination_port_range: 3306
+            access: Allow
+            priority: 1003
+            direction: Outbound
+            source_address_prefix: "*"
+            source_port_range: "*"
+
+          - name: Allow_Internet
+            protocol: Tcp
+            destination_address_prefix: "*"
+            destination_port_range: "*"
+            access: Allow
+            priority: 1050
+            direction: Outbound
+            source_address_prefix: "*"
+            source_port_range: "*"
+
+  tasks:
+
+    - name: Create Resource group
+      azure_rm_resourcegroup:
+        name: "{{ resource_group.name }}"
+        location: "{{ resource_group.location }}"
+
+    - name: Create Network Security Group (NSG)
+      azure_rm_securitygroup:
+        resource_group: "{{ resource_group.name }}"
+        name: "{{ item.0.name }}"
+        rules:
+          - name: "{{ item.1.name }}"
+            protocol: "{{ item.1.protocol }}"
+            destination_address_prefix: "{{ item.1.destination_address_prefix }}"
+            destination_port_range: "{{ item.1.destination_port_range }}"
+            access: "{{ item.1.access }}"
+            priority: "{{ item.1.priority }}"
+            direction: "{{ item.1.direction }}"
+            source_address_prefix: "{{ item.1.source_address_prefix }}"
+            source_port_range: "{{ item.1.source_port_range }}"
+      loop: "{{ network_security_group|subelements('rules') }}"
+      loop_control:
+        label: "{{ item.1.name }} => {{ item.0.name }}"

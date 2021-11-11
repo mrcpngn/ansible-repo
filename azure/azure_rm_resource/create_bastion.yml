@@ -1,0 +1,85 @@
+
+---
+- name: Create Azure Bastion using azure_rm_resource
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  vars:
+    resource_group:
+      name: rg-bastion
+      location: eastus
+
+    virtual_network:
+      name: vnet-hub
+      address_prefixes_cidr: 10.0.0.0/16
+
+    subnet_bastion:
+      name: AzureBastionSubnet
+      address_prefix_cidr: 10.0.0.0/27
+
+    public_ip:
+      name: pip-bastion
+      sku: Standard
+      allocation_method: Static
+      idle_timeout: 5
+
+    rm_bastion:
+      name: bastion-test
+      api_version: '2021-03-01'
+      provider: Network
+      type: bastionHosts
+      ipConfigurations:
+        name: bastion-ipConfig
+
+  tasks:
+    - name: Create Resource group
+      azure_rm_resourcegroup:
+        name: "{{ resource_group.name }}"
+        location: "{{ resource_group.location }}"
+
+    - name: Create Virtual Network
+      azure_rm_virtualnetwork:
+        resource_group: "{{ resource_group.name }}"
+        name: "{{ virtual_network.name }}"
+        address_prefixes_cidr: 
+          - "{{ virtual_network.address_prefixes_cidr }}"
+
+    - name: Create Bastion Subnet
+      azure_rm_subnet:
+        resource_group: "{{ resource_group.name }}"
+        virtual_network_name: "{{ virtual_network.name }}"
+        name: "{{ subnet_bastion.name }}"
+        address_prefix_cidr: "{{ subnet_bastion.address_prefix_cidr }}"
+      register: bastion_subnet_info
+
+    - name: Create Bastion Public IP
+      azure_rm_publicipaddress:
+        resource_group: "{{ resource_group.name }}"
+        name: "{{ public_ip.name }}"
+        sku: "{{ public_ip.sku }}"
+        allocation_method: "{{ public_ip.allocation_method }}"
+        idle_timeout: "{{ public_ip.idle_timeout }}"
+
+    - name: Get facts for Bastion Public IP
+      azure_rm_publicipaddress_info:
+        resource_group: "{{ resource_group.name }}"
+        name: "{{ public_ip.name }}"
+      register: bastion_pip_info
+
+    - name: Create Azure Bastion Host
+      azure_rm_resource:
+        resource_group: "{{ resource_group.name }}"
+        api_version: "{{ rm_bastion.api_version }}"
+        resource_type: "{{ rm_bastion.type }}"
+        resource_name: "{{ rm_bastion.name }}"
+        provider: "{{ rm_bastion.provider }}"
+        body:
+          location: "{{ resource_group.location }}"
+          properties:
+            ipConfigurations:
+              - name: "{{ rm_bastion.ipConfigurations.name }}"
+                properties:
+                  subnet:
+                    id: "{{ bastion_subnet_info.state.id }}"
+                  publicIPAddress:
+                    id: "{{ bastion_pip_info.publicipaddresses.0.id }}"

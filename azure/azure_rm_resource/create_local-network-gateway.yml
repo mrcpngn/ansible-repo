@@ -1,0 +1,50 @@
+---
+- name: Multiple NSG own multiple rules
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  vars:
+    resource_group:
+      name: rg-multi-nsg-rules
+      location: eastus
+
+    virtual_network:
+      name: vnet-hub
+      address_prefixes_cidr: 10.0.0.0/16
+
+    local_network_gateway:
+      api_version: "2021-03-01"
+      provider: Network
+      type: localNetworkGateways
+      name: lng-test
+      network:
+        addressPrefixes: 10.1.0.0/16       # Address Prefix of the other Network rg. 172.16.0.0/16
+        gatewayIpAddress: "192.168.100.54" # Virtual Network Gateway/Target Public IP Address
+
+  tasks:
+    - name: Create Resource group
+      azure_rm_resourcegroup:
+        name: "{{ resource_group.name }}"
+        location: "{{ resource_group.location }}"
+
+    - name: Create Virtual Network
+      azure_rm_virtualnetwork:
+        resource_group: "{{ resource_group.name }}"
+        name: "{{ virtual_network.name }}"
+        address_prefixes_cidr: 
+          - "{{ virtual_network.address_prefixes_cidr }}"
+
+    - name: Create Azure Local Network Gateway 
+      azure_rm_resource:
+        api_version: "{{ local_network_gateway.api_version }}"
+        resource_group: "{{ resource_group.name }}"
+        resource_type: "{{ local_network_gateway.type }}"
+        resource_name: "{{ local_network_gateway.name }}"
+        provider: "{{ local_network_gateway.provider }}"
+        body:
+          location: "{{ resource_group.location }}"
+          properties:
+            localNetworkAddressSpace:
+              addressPrefixes:
+                - "{{ local_network_gateway.network.addressPrefixes }}"
+            gatewayIpAddress: "{{ local_network_gateway.network.gatewayIpAddress }}"

@@ -1,0 +1,85 @@
+---
+- name: Multiple Virtual Network and Multiple Subnets
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  vars:
+
+    resource_group:
+      name: rg-multi-vnet
+      location: eastus
+
+    virtual_network:
+      - vnet_name: VNet-Hub
+        address_prefixes_cidr:
+          - prefix: 10.0.0.0/16
+            subnet:
+            - subnet_name: FireWallSubnet
+              address_prefix_cidr: 10.0.0.0/24
+
+            - subnet_name: GatewaySubnet
+              address_prefix_cidr: 10.0.1.0/27
+            
+          - prefix: 10.1.0.0/16
+            subnet:
+            - subnet_name: BastionSubnet
+              address_prefix_cidr: 10.1.0.0/27
+
+      - vnet_name: VNet-Spoke-A
+        address_prefixes_cidr:
+          - prefix: 10.2.0.0/16
+            subnet:
+            - subnet_name: WebSubnet
+              address_prefix_cidr: 10.2.1.0/24
+
+            - subnet_name: SQLSubnet
+              address_prefix_cidr: 10.2.2.0/24
+
+      - vnet_name: VNet-Spoke-B
+        address_prefixes_cidr:
+          - prefix: 10.3.0.0/16
+            subnet:
+            - subnet_name: HRSubnet
+              address_prefix_cidr: 10.3.1.0/24
+
+  tasks:
+    - name: Initialize VNet Dictionary
+      set_fact:
+        vnet_dict: >
+          {{ vnet_dict|d([])
+            + [ {} | combine(item[0]) | combine(item[1]) ]
+          }}
+      with_subelements:
+        - "{{ virtual_network }}"
+        - address_prefixes_cidr
+      loop_control:
+        label: "Processing VNet dictionary. Please wait."
+
+    - name: Create Resource group
+      azure_rm_resourcegroup:
+        name: "{{ resource_group.name }}"
+        location: "{{ resource_group.location }}"
+        
+    - name: Create Virtual network
+      azure_rm_virtualnetwork:
+        name: "{{ item.0.vnet_name }}"
+        resource_group: rg-multi-vnet
+        address_prefixes_cidr:
+          - "{{ item.0.prefix }}"
+      with_subelements:
+        - "{{ vnet_dict }}"
+        - subnet
+      loop_control:
+        label: " {{ item.0.prefix }} => {{ item.0.vnet_name }} <= {{ item.1.subnet_name }}"
+
+    - name: Create Subnet
+      azure_rm_subnet:
+        resource_group: rg-multi-vnet
+        virtual_network_name: "{{ item.0.vnet_name }}"
+        name: "{{ item.1.subnet_name }}"
+        address_prefix_cidr: "{{ item.1.address_prefix_cidr }}"
+      with_subelements:
+        - "{{ vnet_dict }}"
+        - subnet
+      loop_control:
+        label: " {{ item.1.subnet_name }}({{ item.1.address_prefix_cidr }}) => {{ item.0.vnet_name }}"
