@@ -1,0 +1,156 @@
+---
+- name: Create a Windows a Demo VM 
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  vars:
+    subscription_id: #<INPUT SUBSCRIPTION_ID>#
+    resource_group:
+        name: FJJ-DemoVM
+        location: eastus
+
+    virtual_network:
+      name: VNet-Main
+      address_prefixes_cidr:
+        - 10.0.0.0/16
+        
+    subnet:
+      name: default
+      address_prefix_cidr: 10.0.1.0/24
+
+    public_ip:
+      name: Pip-VM
+      allocation_method: dynamic 
+      sku: basic
+      idle_timeout: 5
+
+    network_security_group:
+      - name: NSG-Main
+        rules:
+          - name: Allow_RDP
+            protocol: Tcp
+            destination_address_prefix: "*"
+            destination_port_range: 3389
+            access: Allow
+            priority: 1000
+            direction: Inbound
+            source_address_prefix: "*"
+            source_port_range: "*"
+
+          - name: Allow_HTTP
+            protocol: Tcp
+            destination_address_prefix: "*"
+            destination_port_range: 80
+            access: Allow
+            priority: 1001
+            direction: Inbound
+            source_address_prefix: "*"
+            source_port_range: "*"
+
+    network_interface_card:
+      name: NIC-VM-Demo
+      ip_configurations:
+        name: NIC-VM-Demo-Ipconfig
+        private_ip_allocation_method: Dynamic
+        primary: True
+
+    virtual_machine:
+      - name: VM-Demo
+        vm_size: Standard_DS1_v2
+        os_type: Windows
+        admin_username: azureuser
+        admin_password: Testing123456
+        managed_disk_type: StandardSSD_LRS
+        os_disk_name: vm-demo-osdisk
+        os_disk_caching: ReadWrite
+        os_disk_size_gb: 128
+        image:
+          offer: WindowsServer
+          publisher: MicrosoftWindowsServer
+          sku: 2019-Datacenter
+          version: latest
+  tasks:
+    - name: Create Resource Group
+      azure_rm_resourcegroup:
+        subscription_id: "{{ subscription_id }}"
+        name: "{{ resource_group.name }}"
+        location: "{{ resource_group.location }}"
+
+    - name: Create Virtual network
+      azure_rm_virtualnetwork:
+        subscription_id: "{{ subscription_id }}"
+        name: "{{ virtual_network.name }}"
+        resource_group: "{{ resource_group.name }}"
+        address_prefixes_cidr:
+          - "{{ virtual_network.address_prefixes_cidr.0 }}"
+
+    - name: Create Subnet
+      azure_rm_subnet:
+        subscription_id: "{{ subscription_id }}"
+        resource_group: "{{ resource_group.name }}"
+        virtual_network_name: "{{ virtual_network.name }}"
+        name: "{{ subnet.name }}"
+        address_prefix_cidr: "{{ subnet.address_prefix_cidr }}"
+
+    - name: Create Demo VM Public IP
+      azure_rm_publicipaddress:
+        subscription_id: "{{ subscription_id }}"
+        resource_group: "{{ resource_group.name }}"
+        name: "{{ public_ip.name }}"
+        allocation_method: "{{ public_ip.allocation_method }}"
+        sku: "{{ public_ip.sku }}"
+        idle_timeout: "{{ public_ip.idle_timeout }}"
+
+    - name: Create Network Security Group (NSG)
+      azure_rm_securitygroup:
+        subscription_id: "{{ subscription_id }}"
+        resource_group: "{{ resource_group.name }}"
+        name: "{{ item.0.name }}"
+        rules:
+          - name: "{{ item.1.name }}"
+            protocol: "{{ item.1.protocol }}"
+            destination_address_prefix: "{{ item.1.destination_address_prefix }}"
+            destination_port_range: "{{ item.1.destination_port_range }}"
+            access: "{{ item.1.access }}"
+            priority: "{{ item.1.priority }}"
+            direction: "{{ item.1.direction }}"
+            source_address_prefix: "{{ item.1.source_address_prefix }}"
+            source_port_range: "{{ item.1.source_port_range }}"
+      loop: "{{ network_security_group|subelements('rules') }}"
+      loop_control:
+        label: "{{ item.1.name }} => {{ item.0.name }}"
+
+    - name: Create Demo VM Network Interface
+      azure_rm_networkinterface:
+        subscription_id: "{{ subscription_id }}"
+        name: "{{ network_interface_card.name }}"
+        resource_group: "{{ resource_group.name }}"
+        virtual_network: "{{ virtual_network.name }}"
+        subnet_name: "{{ subnet.name }}"
+        security_group: "{{ network_security_group.0.name }}"
+        ip_configurations:
+          - name: "{{ network_interface_card.ip_configurations.name }}"
+            private_ip_address: "{{ subnet.address_prefix_cidr }}"
+            private_ip_allocation_method: "{{ network_interface_card.ip_configurations.private_ip_allocation_method }}"
+            public_ip_address_name: "{{ public_ip.name }}"
+            primary: "{{ network_interface_card.ip_configurations.primary }}"
+
+    - name: Create Demo VM Windows
+      azure_rm_virtualmachine:
+        subscription_id: "{{ subscription_id }}"
+        resource_group: "{{ resource_group.name }}"
+        name: "{{ virtual_machine.0.name }}"
+        network_interface_names: "{{ network_interface_card.name }}"
+        vm_size: "{{ virtual_machine.0.vm_size }}"
+        os_type: "{{ virtual_machine.0.os_type }}"
+        admin_username: "{{ virtual_machine.0.admin_username }}"
+        admin_password: "{{ virtual_machine.0.admin_password }}"
+        managed_disk_type: "{{ virtual_machine.0.managed_disk_type }}"
+        os_disk_name: "{{ virtual_machine.0.os_disk_name }}"
+        os_disk_caching: "{{ virtual_machine.0.os_disk_caching }}"
+        os_disk_size_gb: "{{ virtual_machine.0.os_disk_size_gb }}"
+        image:
+          offer: "{{ virtual_machine.0.image.offer }}"
+          publisher: "{{ virtual_machine.0.image.publisher }}"
+          sku: "{{ virtual_machine.0.image.sku }}"
+          version: "{{ virtual_machine.0.image.version }}"
