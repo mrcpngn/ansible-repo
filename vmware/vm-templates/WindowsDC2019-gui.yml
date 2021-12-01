@@ -1,0 +1,145 @@
+---
+- name: Windows 2019 Datacenter Template
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  vars:
+    # Disable SSL checking
+    enable_validate_certs: no
+
+    # vCenter Credentials
+    vcenter_server: "192.168.x.x"
+    vcenter_user: "administrator@vsphere.local"
+    vcenter_pass: "password"
+
+    # vCenter
+    vcenter:
+      host: 192.168.x.x
+      datacenter: dc1
+
+    # ESXi Server
+    esxi:
+      host: 192.168.x.x
+      datastore: datastore1
+
+    # Templates
+    folder:
+      name: templates
+      type: vm
+
+    # Windows Datacenter 2019 - Server Specifications
+    # General Settings:
+    win_server:
+      name: winDC2019-gui
+      guest_id: windows9Server64Guest
+      vm_state: poweredon
+      
+      # CDROM Settings:
+      cdrom:
+      # Primary CD/ROM: 
+        state: present 
+        type: iso
+        iso_path: "[datastore1] iso-files/Windows-2019Datacenter-CUSTOM.ISO"
+
+      disk:
+      # Primary Disk
+      - controller_number: 0
+        controller_type: sata
+        unit_number: 0
+        size_gb: 40
+        type: thin
+        datastore: datastore1
+        disk_mode: persistent
+
+      # System Specifications (RAM and vCPUs)
+      hardware:
+        memory_mb: 4096
+        num_cpus: 2
+        scsi: paravirtual
+
+      # Network Settings:
+      networks:
+      - name: VM Network
+        connected: yes
+        start_connected: yes
+
+  tasks:
+  # Create VM Templates folder
+  - name: Create a folder for VM Templates
+    vcenter_folder:
+      hostname: "{{ vcenter_server }}"
+      username: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      datacenter_name: "{{ vcenter.datacenter }}"
+      validate_certs: "{{ enable_validate_certs }}"
+      folder_name: "{{ folder.name }}"
+    register: templates_info
+
+  # Create Windows DC 2019 Server
+  - name: Provision and Install Windows Datacenter 2019
+    vmware_guest:
+      hostname: "{{ vcenter_server }}"
+      username: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      esxi_hostname: "{{ esxi.host }}"
+      validate_certs: "{{ enable_validate_certs }}"
+      datacenter: "{{ vcenter.datacenter }}"
+      folder: "{{ templates_info.result.path }}"
+      wait_for_ip_address: yes
+
+      # General Settings:
+      name: "{{ win_server.name }}"
+      guest_id: "{{ win_server.guest_id }}"
+      state: "{{ win_server.vm_state }}"
+      datastore: "{{ esxi.datastore }}"
+      cdrom:
+        state: "{{ win_server.cdrom.state }}" 
+        type: "{{ win_server.cdrom.type }}"
+        iso_path: "{{ win_server.cdrom.iso_path }}"
+
+      disk:
+      # Primary Disk
+      - controller_number: "{{ win_server.disk.0.controller_number }}"
+        controller_type: "{{ win_server.disk.0.controller_type }}"
+        unit_number: "{{ win_server.disk.0.unit_number }}"
+        size_gb: "{{ win_server.disk.0.size_gb }}"
+        type: "{{ win_server.disk.0.type }}"
+        datastore: "{{ win_server.disk.0.datastore }}"
+        disk_mode: "{{ win_server.disk.0.disk_mode }}"
+
+      # System Specifications (RAM and vCPUs)
+      hardware:
+        memory_mb: "{{ win_server.hardware.memory_mb }}"
+        num_cpus: "{{ win_server.hardware.num_cpus }}"
+        scsi: "{{ win_server.hardware.scsi }}"
+
+      # Network Settings:
+      networks:
+      - name: "{{ win_server.networks.0.name }}"
+        connected: "{{ win_server.networks.0.connected }}"
+        start_connected: "{{ win_server.networks.0.start_connected }}"
+    register: vm_info
+
+  # Shutdown VM for conversion
+  - name: Gracefully shutting down VM
+    vmware_guest_powerstate:  
+      hostname: "{{ vcenter_server }}"
+      username: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      validate_certs: "{{ enable_validate_certs }}"
+      name: "{{ win_server.name }}"
+      state: powered-off
+
+  # Convert VM to template
+  - name: Convert VM to template
+    vmware_guest:
+      hostname: "{{ vcenter_server }}"
+      username: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      esxi_hostname: "{{ esxi.host }}"
+      validate_certs: "{{ enable_validate_certs }}"
+      datacenter: "{{ vcenter.datacenter }}"
+      name: "{{ win_server.name }}"
+      guest_id: "{{ win_server.guest_id }}"
+      datastore: "{{ esxi.datastore }}"
+      is_template: yes

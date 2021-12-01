@@ -1,0 +1,187 @@
+---
+- name: CentOS 7.9 VMWare Template
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  vars:
+    # Disable SSL checking
+    enable_validate_certs: no
+
+    # vCenter Credentials
+    vcenter_server: "192.168.x.x"
+    vcenter_user: "administrator@vsphere.local"
+    vcenter_pass: "password"
+
+    # vCenter
+    vcenter:
+      host: 192.168.x.x
+      datacenter: dc1
+
+    # ESXi Server
+    esxi:
+      host: 192.168.x.x
+      datastore: datastore1
+
+    # Templates
+    folder:
+      name: templates
+      type: vm
+
+    # Centos7 - Server Specifications
+    # General Settings:
+    centos_base:
+      is_template: yes
+      name: centos7
+      vm_state: poweredon
+      guest_id: centos7_64Guest
+
+      # CDROM Settings:
+      cdrom:
+      # Primary CD/ROM: 
+        - controller_number: 0
+          controller_type: ide
+          unit_number: 0
+          state: present 
+          type: iso
+          iso_path: "[datastore1] iso-files/CentOS-7-x86_64-Minimal-2009.iso"
+
+      # Storage Settings:
+      disk:
+      # Primary Disk
+      - controller_number: 0
+        controller_type: sata
+        unit_number: 0
+        size_gb: 16
+        type: thin
+        datastore: datastore1
+        disk_mode: persistent
+
+      # System Specifications (RAM and vCPUs)
+      hardware:
+        memory_mb: 1024
+        num_cpus: 1
+        scsi: paravirtual
+
+      # Network Settings:
+      networks:
+      - name: VM Network
+        connected: yes
+        start_connected: yes
+      
+      # URL of the ks.cfg script
+      ks_script: "append initrd=initrd.img inst.ks=https://raw.githubusercontent.com/user/repo/branch/ks-centos7-minimal-test.cfg"
+      
+      # Default Root Credentials: 
+      # Username: root
+      # Password: password
+
+  tasks:
+  # Create VM Templates folder
+  - name: Create a folder for VM Templates
+    community.vmware.vcenter_folder:
+      hostname: "{{ vcenter_server }}"
+      username: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      datacenter_name: "{{ vcenter.datacenter }}"
+      validate_certs: "{{ enable_validate_certs }}"
+      folder_name: "{{ folder.name }}"
+    register: templates_info
+
+  - name: Provision and Install Centos7
+    community.vmware.vmware_guest:
+      hostname: "{{ vcenter_server }}"
+      username: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      esxi_hostname: "{{ esxi.host }}"
+      validate_certs: "{{ enable_validate_certs }}"
+      datacenter: "{{ vcenter.datacenter }}"
+      folder: "{{ templates_info.result.path }}"
+      name: "{{ centos_base.name }}"
+      state: "{{ centos_base.vm_state }}"
+      guest_id: "{{ centos_base.guest_id }}"
+      datastore: "{{ esxi.datastore }}"
+      cdrom:
+        # Primary CD/ROM: 
+        - controller_number: "{{ centos_base.cdrom.0.controller_number }}" 
+          controller_type: "{{ centos_base.cdrom.0.controller_type }}" 
+          unit_number: "{{ centos_base.cdrom.0.unit_number }}" 
+          state: "{{ centos_base.cdrom.0.state }}" 
+          type: "{{ centos_base.cdrom.0.type }}"
+          iso_path: "{{ centos_base.cdrom.0.iso_path }}"
+
+      disk:
+      # Primary Disk
+      - controller_number: "{{ centos_base.disk.0.controller_number }}"
+        controller_type: "{{ centos_base.disk.0.controller_type }}"
+        unit_number: "{{ centos_base.disk.0.unit_number }}"
+        size_gb: "{{ centos_base.disk.0.size_gb }}"
+        type: "{{ centos_base.disk.0.type }}"
+        datastore: "{{ centos_base.disk.0.datastore }}"
+        disk_mode: "{{ centos_base.disk.0.disk_mode }}"
+
+      # System Specifications (RAM and vCPUs)
+      hardware:
+        memory_mb: "{{ centos_base.hardware.memory_mb }}"
+        num_cpus: "{{ centos_base.hardware.num_cpus }}"
+        scsi: "{{ centos_base.hardware.scsi }}"
+
+      # Network Settings:
+      networks:
+      - name: "{{ centos_base.networks.0.name }}"
+        connected: "{{ centos_base.networks.0.connected }}"
+        start_connected: "{{ centos_base.networks.0.start_connected }}"
+      is_template: "{{ centos_base.is_template  }}"
+    register: centos_base_info
+
+  # Paste the ks.cfg http/https link on the boot prompt
+  - name: Initialize ks.cfg
+    vmware_guest_sendkey:
+      validate_certs: "{{ enable_validate_certs }}"
+      hostname: "{{ vcenter_server }}"
+      username: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      name: "{{ centos_base.name }}"
+      keys_send:
+      - TAB
+      string_send: " {{ centos_base.ks_script }}"
+  # Execute ks.cfg
+  - name: Execute ks.cfg
+    vmware_guest_sendkey:
+      validate_certs: "{{ enable_validate_certs }}"
+      hostname: "{{ vcenter_server }}"
+      username: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      name: "{{ centos_base.name }}"
+      keys_send:
+      - ENTER
+
+  # Wait for 5 minutes before resuming the playbook
+  - name: Wait for ks.cfg to complete
+    wait_for:
+      timeout: 300
+
+  # Gather the power status of the VM
+  - name: Get VM Power Status
+    community.vmware.vmware_guest_info:
+      validate_certs: "{{ enable_validate_certs }}"
+      hostname: "{{ vcenter_server }}"
+      username: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      name: "{{ centos_base.name }}"
+      datacenter: "{{ vcenter.datacenter }}"
+    register: vm_info
+
+  # Convert VM to template
+  - name: Convert VM to template
+    community.vmware.vmware_guest:
+      hostname: "{{ vcenter_server }}"
+      username: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      esxi_hostname: "{{ esxi.host }}"
+      validate_certs: "{{ enable_validate_certs }}"
+      datacenter: "{{ vcenter.datacenter }}"
+      name: "{{ centos_base.name }}"
+      guest_id: "{{ centos_base.guest_id }}"
+      datastore: "{{ esxi.datastore }}"
+      is_template: yes
+    when: vm_info.instance.hw_power_status == "poweredOff"

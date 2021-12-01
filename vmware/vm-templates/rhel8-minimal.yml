@@ -1,0 +1,190 @@
+---
+- name: Redhat Enterprise Linux 8 VMWare Template
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  vars:
+    # Disable SSL checking
+    enable_validate_certs: no
+
+    # vCenter Credentials
+    vcenter_server: "192.168.x.x"
+    vcenter_user: "administrator@vsphere.local"
+    vcenter_pass: "password"
+
+    # vCenter
+    vcenter:
+      host: 192.168.x.x
+      datacenter: dc1
+
+    # ESXi Server
+    esxi:
+      host: 192.168.x.x
+      datastore: datastore1
+
+    # Templates
+    folder:
+      name: templates
+      type: vm
+
+    # Centos7 - Server Specifications
+    # General Settings:
+    rhel_base:
+      is_template: yes
+      name: rhel8-minimal
+      vm_state: poweredon
+      guest_id: rhel8_64Guest
+
+      # CDROM Settings:
+      cdrom:
+      # Primary CD/ROM: 
+        controller_number: 0
+        controller_type: ide
+        unit_number: 0
+        state: present 
+        type: iso
+        iso_path: "[datastore1] iso-files/rhel-8.5-x86_64-dvd.iso"
+
+      # Storage Settings:
+      disk:
+      # Primary Disk
+      - controller_number: 0
+        controller_type: ide
+        unit_number: 0
+        size_gb: 16
+        type: thin
+        datastore: datastore1
+        disk_mode: persistent
+
+      # System Specifications (RAM and vCPUs)
+      hardware:
+        memory_mb: 1024
+        num_cpus: 1
+        scsi: paravirtual
+
+      # Network Settings:
+      networks:
+      - name: VM Network
+        connected: yes
+        start_connected: yes
+      
+      # URL of the ks.cfg script
+      ks: 
+        boot_option: "append initrd=initrd.img inst.ks="
+        source: "https://raw.githubusercontent.com/user/repo/branch/ks-rhel8-minimal.cfg"
+
+      # Default Root Credentials: 
+      # Username: root
+      # Password: rhel8password
+
+  tasks:
+  # Create VM Templates folder
+  - name: Create a folder for VM Templates
+    vcenter_folder:
+      hostname: "{{ vcenter_server }}"
+      username: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      datacenter_name: "{{ vcenter.datacenter }}"
+      validate_certs: "{{ enable_validate_certs }}"
+      folder_name: "{{ folder.name }}"
+    register: templates_info
+
+  - name: Provision and Install RHEL8
+    vmware_guest:
+      hostname: "{{ vcenter_server }}"
+      username: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      esxi_hostname: "{{ esxi.host }}"
+      validate_certs: "{{ enable_validate_certs }}"
+      datacenter: "{{ vcenter.datacenter }}"
+      folder: "{{ templates_info.result.path }}"
+
+      # General Settings:
+      name: "{{ rhel_base.name }}"
+      state: "{{ rhel_base.vm_state }}"
+      guest_id: "{{ rhel_base.guest_id }}"
+      datastore: "{{ esxi.datastore }}"
+      cdrom:
+        # Primary CD/ROM: 
+        controller_number: "{{ rhel_base.cdrom.controller_number }}" 
+        controller_type: "{{ rhel_base.cdrom.controller_type }}" 
+        unit_number: "{{ rhel_base.cdrom.unit_number }}" 
+        state: "{{ rhel_base.cdrom.state }}" 
+        type: "{{ rhel_base.cdrom.type }}"
+        iso_path: "{{ rhel_base.cdrom.iso_path }}"
+
+      disk:
+      # Primary Disk
+      - controller_number: "{{ rhel_base.disk.0.controller_number }}"
+        controller_type: "{{ rhel_base.disk.0.controller_type }}"
+        unit_number: "{{ rhel_base.disk.0.unit_number }}"
+        size_gb: "{{ rhel_base.disk.0.size_gb }}"
+        type: "{{ rhel_base.disk.0.type }}"
+        datastore: "{{ rhel_base.disk.0.datastore }}"
+        disk_mode: "{{ rhel_base.disk.0.disk_mode }}"
+
+      # System Specifications (RAM and vCPUs)
+      hardware:
+        memory_mb: "{{ rhel_base.hardware.memory_mb }}"
+        num_cpus: "{{ rhel_base.hardware.num_cpus }}"
+        scsi: "{{ rhel_base.hardware.scsi }}"
+
+      # Network Settings:
+      networks:
+      - name: "{{ rhel_base.networks.0.name }}"
+        connected: "{{ rhel_base.networks.0.connected }}"
+        start_connected: "{{ rhel_base.networks.0.start_connected }}"
+    register: rhel_base_info
+
+  # Paste the ks.cfg http/https link on the boot prompt
+  - name: Initialize ks.cfg
+    vmware_guest_sendkey:
+      validate_certs: "{{ enable_validate_certs }}"
+      hostname: "{{ vcenter_server }}"
+      username: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      name: "{{ rhel_base.name }}"
+      keys_send:
+      - TAB
+      string_send: " {{ rhel_base.ks.boot_option }}{{ rhel_base.ks.source }}"
+  # Execute ks.cfg
+  - name: Execute ks.cfg
+    vmware_guest_sendkey:
+      validate_certs: "{{ enable_validate_certs }}"
+      hostname: "{{ vcenter_server }}"
+      username: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      name: "{{ rhel_base.name }}"
+      keys_send:
+      - ENTER
+
+  # Wait for 8 minutes before resuming the playbook
+  - name: Wait for ks.cfg to complete
+    wait_for:
+      timeout: 480
+
+  - name: Turn-off VM 
+    vmware_guest:
+      hostname: "{{ vcenter_server }}"
+      username: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      esxi_hostname: "{{ esxi.host }}"
+      validate_certs: "{{ enable_validate_certs }}"
+      name: "{{ rhel_base.name }}"
+      state: poweredoff
+      wait_for_ip_address: yes
+
+  # Convert VM to template
+  - name: Convert VM to template
+    vmware_guest:
+      hostname: "{{ vcenter_server }}"
+      username: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      esxi_hostname: "{{ esxi.host }}"
+      validate_certs: "{{ enable_validate_certs }}"
+      datacenter: "{{ vcenter.datacenter }}"
+      name: "{{ rhel_base.name }}"
+      guest_id: "{{ rhel_base.guest_id }}"
+      datastore: "{{ esxi.datastore }}"
+      is_template: yes
+
